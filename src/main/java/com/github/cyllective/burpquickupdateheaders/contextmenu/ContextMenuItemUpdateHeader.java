@@ -45,7 +45,15 @@ public class ContextMenuItemUpdateHeader implements ContextMenuItemsProvider {
         for (HttpHeader header : currentHeaders) {
             if (SettingsMenuHeaderFilter.isHeaderInSelection(header.name())) {
                 JMenuItem menuItem = new JMenuItem(header.name());
-                menuItem.addActionListener(e -> updateHeaderFromHistory(header.name(), hostValue, selectedRequestResponse));
+                menuItem.addActionListener(e -> {
+                    Thread thread = new Thread(
+                            () -> updateHeaderFromHistory(header.name(), hostValue, selectedRequestResponse),
+                            "QuickUpdateHeaders-worker"
+                    );
+                    thread.setDaemon(true);
+                    thread.start();
+                });
+
                 listMenuItems.add(menuItem);
             }
         }
