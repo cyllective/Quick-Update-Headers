@@ -3,6 +3,7 @@ package com.github.cyllective.burpquickupdateheaders.contextmenu;
 import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.core.ToolType;
 import burp.api.montoya.http.message.HttpHeader;
+import burp.api.montoya.proxy.ProxyHistoryFilter;
 import burp.api.montoya.proxy.ProxyHttpRequestResponse;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
@@ -11,8 +12,9 @@ import com.github.cyllective.burpquickupdateheaders.settingsmenu.SettingsMenuHea
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.*;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.ListIterator;
 
 import static java.util.Collections.emptyList;
 
@@ -36,8 +38,8 @@ public class ContextMenuItemUpdateHeader implements ContextMenuItemsProvider {
             return emptyList();
         }
 
-        String hostValue = selectedRequestResponse.requestResponse().request().headerValue("Host");
-        if (hostValue == null) {
+        String targetHost = selectedRequestResponse.requestResponse().request().headerValue("Host");
+        if (targetHost == null) {
             return emptyList();
         }
 
@@ -47,7 +49,7 @@ public class ContextMenuItemUpdateHeader implements ContextMenuItemsProvider {
                 JMenuItem menuItem = new JMenuItem(header.name());
                 menuItem.addActionListener(e -> {
                     Thread thread = new Thread(
-                            () -> updateHeaderFromHistory(header.name(), hostValue, selectedRequestResponse),
+                            () -> updateHeaderFromHistory(header.name(), targetHost, selectedRequestResponse),
                             "QuickUpdateHeaders-worker"
                     );
                     thread.setDaemon(true);
@@ -66,12 +68,20 @@ public class ContextMenuItemUpdateHeader implements ContextMenuItemsProvider {
                 event.messageEditorRequestResponse().isPresent();
     }
 
-    private void updateHeaderFromHistory(String headerName, String hostValue,
+    private void updateHeaderFromHistory(String targetHeader, String targetHost,
                                          MessageEditorHttpRequestResponse selectedResponse) {
 
-        // It is faster (in big projects) to go through the whole history
-        // rather than to filter the history first by host header
-        List<ProxyHttpRequestResponse> history = api.proxy().history();
+        // Filter history by the target host we are looking for
+        ProxyHistoryFilter historyFilter = proxyHttpRequestResponse -> {
+            String hostHeader = proxyHttpRequestResponse.request().headerValue("Host");
+            if (hostHeader == null) {
+                return false;
+            }
+
+            return hostHeader.equals(targetHost);
+        };
+
+        List<ProxyHttpRequestResponse> history = api.proxy().history(historyFilter);
         if (history.isEmpty()) {
             return;
         }
@@ -83,20 +93,12 @@ public class ContextMenuItemUpdateHeader implements ContextMenuItemsProvider {
             // Go through the list in reverse as we want the newest entries first
             ProxyHttpRequestResponse historyEntry = historyIterator.previous();
 
-            HttpHeader hostHeader = historyEntry.request().header("Host");
-            if (hostHeader == null) {
-                continue;
-            }
-
-            if (hostHeader.value().equals(hostValue)) {
-                // We are on the same host
-                HttpHeader headerToInsert = historyEntry.request().header(headerName);
-                if (headerToInsert != null) {
-                    // Update the request with the newest header
-                    selectedResponse.setRequest(
-                            selectedResponse.requestResponse().request().withHeader(headerToInsert));
-                    break; // Only update with the first (most recent) match
-                }
+            HttpHeader headerToInsert = historyEntry.request().header(targetHeader);
+            if (headerToInsert != null) {
+                // Update the request with the newest header
+                selectedResponse.setRequest(
+                        selectedResponse.requestResponse().request().withHeader(headerToInsert));
+                break; // Only update with the first (most recent) match
             }
         }
     }
